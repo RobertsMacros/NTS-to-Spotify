@@ -27,7 +27,8 @@ export interface SpotifyCandidate {
 export function normalise(s: string): string {
   return s
     .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u0300-\u036f]/g, '') // Latin accents only — then recompose so kana voicing marks survive
+    .normalize('NFC')
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/\b(featuring|feat|ft)\.?(?=\s|$)/g, ' feat ')
