@@ -38,6 +38,12 @@ export function normalise(s: string): string {
     .replace(/\s+/g, ' ')
 }
 
+/** NTS often copies Discogs-style "原題 = Translation" titles; Spotify lists one half. */
+export function titleVariants(title: string): string[] {
+  const parts = title.split(/\s+=\s+/).map((p) => p.trim()).filter(Boolean)
+  return parts.length > 1 ? [title, ...parts] : [title]
+}
+
 /** NTS truncates long titles with "..." / "…". Returns the untruncated prefix, or null. */
 export function truncatedPrefix(title: string): string | null {
   const m = title.trim().match(/^(.*?)\s*(?:\.\.\.|…)$/)
@@ -127,6 +133,35 @@ function coreTitle(title: string): string {
   return normalise(stripFeat(title).replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, ''))
 }
 
+/** Damerau–Levenshtein distance (transposition counts as one edit). */
+export function editDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)])
+  for (let j = 1; j <= n; j++) d[0][j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+    }
+  }
+  return d[m][n]
+}
+
+/** A hand-typed tracklist typo: at most 2 edits and under 30% of the name ("K. Frued" ≈ "K. Freund"). */
+export function isTypoOf(a: string, b: string): boolean {
+  const x = normalise(a)
+  const y = normalise(b)
+  if (!x || !y) return false
+  const dist = editDistance(x, y)
+  return dist <= 2 && dist / Math.max(x.length, y.length) <= 0.3
+}
+
+function artistTypo(nts: string[], sp: string[]): boolean {
+  return splitArtists(nts).some((a) => splitArtists(sp).some((b) => isTypoOf(a, b)))
+}
+
 function artistScore(nts: string[], sp: string[]): number {
   const a = splitArtists(nts).map(normalise).filter(Boolean)
   const b = splitArtists(sp).map(normalise).filter(Boolean)
@@ -143,6 +178,9 @@ function artistScore(nts: string[], sp: string[]): number {
 
 export interface MatchScore { score: number; title: number; artist: number; sameVersion: boolean }
 
+/** Gates: identical version tags, title ≥ 0.9, artist ≥ 0.75 (covers!), blend ≥ 0.9. */
+export const GATES = { title: 0.9, artist: 0.75, score: 0.9 }
+
 /** Confidence that `c` is the very same version NTS logged as `t`. */
 export function scoreCandidate(t: NtsTrack, c: SpotifyCandidate): MatchScore {
   const artist = artistScore(t.artists, c.artists)
@@ -157,12 +195,11 @@ export function scoreCandidate(t: NtsTrack, c: SpotifyCandidate): MatchScore {
     return { sameVersion, title, artist, score: sameVersion ? title * 0.6 + artist * 0.4 : 0 }
   }
   const sameVersion = sameSet(versionTags(t.title), versionTags(c.name))
-  const title = Math.max(similarity(normalise(stripFeat(t.title)), normalise(stripFeat(c.name))), similarity(coreTitle(t.title), coreTitle(c.name)))
-  return { sameVersion, title, artist, score: sameVersion ? title * 0.6 + artist * 0.4 : 0 }
+  const title = Math.max(...titleVariants(t.title).map((v) => Math.max(similarity(normalise(stripFeat(v)), normalise(stripFeat(c.name))), similarity(coreTitle(v), coreTitle(c.name)))))
+  // An exact title with an artist that is one or two keystrokes off is a tracklist typo, not a cover.
+  const artistOk = title >= 0.97 && artist < GATES.artist && artistTypo(t.artists, c.artists) ? GATES.artist : artist
+  return { sameVersion, title, artist: artistOk, score: sameVersion ? title * 0.6 + artistOk * 0.4 : 0 }
 }
-
-/** Gates: identical version tags, title ≥ 0.9, artist ≥ 0.75 (covers!), blend ≥ 0.9. */
-export const GATES = { title: 0.9, artist: 0.75, score: 0.9 }
 
 /** Best candidate that clears every gate, else null — never a "close enough" fallback. */
 export function pickBest(t: NtsTrack, cands: SpotifyCandidate[], gates = GATES): { pick: SpotifyCandidate; score: number } | null {
@@ -178,15 +215,19 @@ export function pickBest(t: NtsTrack, cands: SpotifyCandidate[], gates = GATES):
 /** Search strings to try in order — fielded first (precise), then free text with the same
  *  words. Each hit is still gated by pickBest, so a broader query can't pick a wrong track. */
 export function buildQueries(t: NtsTrack): string[] {
-  const title = stripFeat(truncatedPrefix(t.title) ?? t.title).trim()
   const artists = splitArtists(t.artists)
   const lead = artists[0] ?? ''
-  const q = (s: string) => s.replace(/"/g, '').replace(/\s+/g, ' ').trim()
-  const out = [
-    lead ? `track:"${q(title)}" artist:"${q(lead)}"` : '',
-    lead ? q(`${title} ${lead}`) : '',
-    q(`${t.title} ${t.artists.join(' ')}`),
-  ]
+  // Quotes and brackets break Spotify's query parser ("(I Don't Need To) Wonder" returns junk).
+  const q = (s: string) => s.replace(/["()[\]{}]/g, ' ').replace(/\s+/g, ' ').trim()
+  const out: string[] = []
+  for (const v of titleVariants(truncatedPrefix(t.title) ?? t.title)) {
+    const title = stripFeat(v).trim()
+    const core = title.replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, '').trim()
+    if (lead) out.push(`track:"${q(title)}" artist:"${q(lead)}"`)
+    if (lead && core && core !== title) out.push(`track:"${q(core)}" artist:"${q(lead)}"`)
+    if (lead) out.push(q(`${title} ${lead}`))
+  }
+  out.push(q(`${t.title} ${t.artists.join(' ')}`))
   return [...new Set(out.filter(Boolean))]
 }
 

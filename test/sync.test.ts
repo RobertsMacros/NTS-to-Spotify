@@ -5,7 +5,7 @@
  * track — and if nothing clears the bar we say "not found" rather than settling.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { buildQueries, normalise, parseSpotifyTrackId, pickBest, scoreCandidate, splitArtists, stripFeat, truncatedPrefix, versionTags, type NtsTrack, type SpotifyCandidate } from '../src/match'
+import { buildQueries, editDistance, isTypoOf, normalise, parseSpotifyTrackId, pickBest, scoreCandidate, splitArtists, stripFeat, titleVariants, truncatedPrefix, versionTags, type NtsTrack, type SpotifyCandidate } from '../src/match'
 import { clampCap, emptyState, isDue, pinMatches, runSync, type SyncState, type SyncStore } from '../src/sync'
 
 const nts = (title: string, artists: string[], uid = 't1'): NtsTrack => ({ uid, title, artists, savedAt: '2026-09-01T00:00:00.000Z' })
@@ -93,6 +93,20 @@ describe('pickBest — same version only, else null', () => {
     const u = nts('Song', ['Artist', 'Guest'])
     expect(pickBest(u, [sp('b', 'Song (feat. Guest)', ['Artist', 'Guest'])])?.pick.id).toBe('b')
   })
+  it('forgives a one-or-two-keystroke artist typo when the title is exact, never a cover', () => {
+    expect(editDistance('k frued', 'k freund')).toBe(2)
+    expect(isTypoOf('K. Frued', 'K. Freund')).toBe(true)
+    expect(isTypoOf('Leonard Cohen', 'Jeff Buckley')).toBe(false)
+    expect(pickBest(nts('Shaking Off The Ice', ['K. Frued']), [sp('a', 'Shaking off the Ice', ['K. Freund'])])?.pick.id).toBe('a')
+    expect(pickBest(nts('Shaking Off The Ice (Remix)', ['K. Frued']), [sp('a', 'Shaking off the Ice', ['K. Freund'])])).toBeNull()
+    expect(pickBest(nts('Shaking Off The Ice', ['K. Frued']), [sp('a', 'Shaking off the Ices', ['K. Freund'])])).toBeNull() // typo tolerance needs an exact title
+  })
+  it('a "原題 = Translation" title matches either half', () => {
+    expect(titleVariants('甘いひびき = Sweet Things')).toEqual(['甘いひびき = Sweet Things', '甘いひびき', 'Sweet Things'])
+    expect(pickBest(nts('甘いひびき = Sweet Things', ['Ai Aso']), [sp('a', '甘いひびき', ['Ai Aso'])])?.pick.id).toBe('a')
+    expect(pickBest(nts('甘いひびき = Sweet Things', ['Ai Aso']), [sp('b', 'Sweet Things', ['Ai Aso'])])?.pick.id).toBe('b')
+    expect(pickBest(nts('甘いひびき = Sweet Things', ['Ai Aso']), [sp('c', 'Sweet Thing', ['Warm Blanket'])])).toBeNull()
+  })
   it('scores are explicable', () => {
     const s = scoreCandidate(nts('Archangel', ['Burial']), sp('r', 'Archangel (Four Tet Remix)', ['Burial']))
     expect(s.sameVersion).toBe(false)
@@ -107,6 +121,18 @@ describe('queries + ids', () => {
     expect(q[1]).toBe('Song Two A')
     expect(q).toHaveLength(3)
     expect(q).not.toContain('Song Two')
+  })
+  it('brackets never reach the query; a bracketed title also gets a core-title query', () => {
+    const q = buildQueries(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']))
+    expect(q.some((x) => /[()]/.test(x))).toBe(false)
+    expect(q[0]).toBe(`track:"I Don't Need To Wonder" artist:"Black Hearted Brother"`)
+    expect(q[1]).toBe(`track:"Wonder" artist:"Black Hearted Brother"`)
+    // …but the gate still demands the bracketed part on the Spotify side
+    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', 'Wonder', ['Black Hearted Brother'])])).toBeNull()
+    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', "(I Don't Need To) Wonder", ['Black Hearted Brother'])])?.pick.id).toBe('w')
+    const e = buildQueries(nts('甘いひびき = Sweet Things', ['Ai Aso']))
+    expect(e).toContain('track:"甘いひびき" artist:"Ai Aso"')
+    expect(e).toContain('track:"Sweet Things" artist:"Ai Aso"')
   })
   it('parses Spotify ids from URL / URI / bare id', () => {
     expect(parseSpotifyTrackId('https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=abc')).toBe('4uLU6hMCjMI75M1A2tKUQC')

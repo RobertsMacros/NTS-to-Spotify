@@ -27,7 +27,8 @@ for (const t of targets) {
     const hits = await searchTracks(token, q, 5)
     const fresh = hits.filter((h) => !seen.has(h.id))
     fresh.forEach((h) => seen.add(h.id))
-    if (!fresh.length) continue
+    if (!hits.length) { console.log(`  search: ${q}   → no hits`); continue }
+    if (!fresh.length) { console.log(`  search: ${q}   → same hits as above`); continue }
     any = true
     console.log(`  search: ${q}`)
     for (const h of fresh) {
