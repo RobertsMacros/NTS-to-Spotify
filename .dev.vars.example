@@ -1,0 +1,18 @@
+# Copy to ".dev.vars" — or just run `npm run setup`, which writes it for you.
+# .dev.vars is gitignored. It is read by `npm run sync` (local) and uploaded by `npm run deploy` (Worker).
+
+# NTS: long-lived Firebase refresh token for your My NTS account (from the setup script).
+NTS_REFRESH_TOKEN=AMf-vBx...
+# Optional — defaults to nts.live's public web key.
+# NTS_FIREBASE_API_KEY=
+
+# Spotify: your own developer app (https://developer.spotify.com/dashboard, redirect URI http://127.0.0.1:8888/callback).
+SPOTIFY_CLIENT_ID=your_spotify_app_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_app_client_secret
+SPOTIFY_REFRESH_TOKEN=AQB...
+
+# Optional "not on Spotify" push: an ntfy.sh topic you subscribe to in the ntfy app.
+NTS_NOTIFY_URL=https://ntfy.sh/your-private-topic-name
+
+# Worker only: bearer token that protects /status, /run and /pin (the setup script generates one).
+SYNC_TOKEN=

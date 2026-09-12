@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd agent: run the NTS → Spotify Liked Songs sync on a timer (the local
+  alternative to the Cloudflare cron). Copy to
+  ~/Library/LaunchAgents/com.robertsmacros.ntstospotify.plist, edit the PATHS below, then:
+  launchctl load ~/Library/LaunchAgents/com.robertsmacros.ntstospotify.plist
+  See README.md.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.robertsmacros.ntstospotify</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/npx</string>
+    <string>tsx</string>
+    <string>scripts/sync.ts</string>
+  </array>
+
+  <!-- Secrets are read from .dev.vars in the repo (gitignored), so run from the repo root. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/path/to/NTS-to-Spotify</string>
+
+  <!-- Every 15 minutes (900s). RunAtLoad does one on login/load. -->
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/nts-to-spotify.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/nts-to-spotify.log</string>
+</dict>
+</plist>

@@ -1,0 +1,16 @@
+{
+  // Optional Cloudflare Worker host — the sync then runs every 15 minutes with no computer on.
+  //
+  //   1. npx wrangler kv namespace create STATE     → paste the id below
+  //   2. npm run setup                              → writes the secrets to .dev.vars
+  //   3. npm run deploy                             → uploads the secrets + deploys
+  //   4. curl -H "Authorization: Bearer $SYNC_TOKEN" https://nts-to-spotify.<you>.workers.dev/status
+  //
+  // Secrets: NTS_REFRESH_TOKEN · SPOTIFY_CLIENT_ID · SPOTIFY_CLIENT_SECRET · SPOTIFY_REFRESH_TOKEN
+  //          SYNC_TOKEN (bearer token for /status, /run, /pin) · NTS_NOTIFY_URL (optional ntfy topic)
+  "name": "nts-to-spotify",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-06-01",
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "kv_namespaces": [{ "binding": "STATE", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }]
+}
