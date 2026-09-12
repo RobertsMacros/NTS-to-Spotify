@@ -78,11 +78,15 @@ const chunk = <T,>(xs: T[], n: number): T[][] => {
   return out
 }
 
+// Library endpoints (Feb 2026): the old /me/tracks + /me/tracks/contains now answer a bare
+// 403. The replacements take up to 40 `spotify:track:` URIs as a query parameter.
+const uriQuery = (ids: string[]) => new URLSearchParams({ uris: ids.map((id) => `spotify:track:${id}`).join(',') }).toString()
+
 /** Which of these ids are already in Liked Songs (same order as input). */
 export async function alreadySaved(token: string, ids: string[]): Promise<boolean[]> {
   const out: boolean[] = []
-  for (const c of chunk(ids, 50)) {
-    const j = await api(token, `/me/tracks/contains?ids=${c.join(',')}`)
+  for (const c of chunk(ids, 40)) {
+    const j = await api(token, `/me/library/contains?${uriQuery(c)}`)
     out.push(...(Array.isArray(j) ? j.map(Boolean) : c.map(() => false)))
   }
   return out
@@ -90,5 +94,5 @@ export async function alreadySaved(token: string, ids: string[]): Promise<boolea
 
 /** Add to Liked Songs. Idempotent on Spotify's side. */
 export async function saveTracks(token: string, ids: string[]): Promise<void> {
-  for (const c of chunk(ids, 50)) await api(token, '/me/tracks', { method: 'PUT', body: JSON.stringify({ ids: c }) })
+  for (const c of chunk(ids, 40)) await api(token, `/me/library?${uriQuery(c)}`, { method: 'PUT' })
 }

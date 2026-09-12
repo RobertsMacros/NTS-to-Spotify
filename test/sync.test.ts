@@ -138,8 +138,9 @@ function fakeFetch(f: Fake) {
       const items = f.catalogue.filter((c) => words.some((w) => `${c.name} ${c.artists.join(' ')}`.toLowerCase().includes(w)))
       return ok({ tracks: { items: items.map((c) => ({ id: c.id, name: c.name, artists: c.artists.map((name) => ({ name })) })) } })
     }
-    if (url.includes('/v1/me/tracks/contains')) return ok(new URL(url).searchParams.get('ids')!.split(',').map((id) => f.liked.has(id)))
-    if (url.includes('/v1/me/tracks') && init.method === 'PUT') { for (const id of JSON.parse(init.body).ids) f.liked.add(id); return new Response(null, { status: 200 }) }
+    const uris = () => new URL(url).searchParams.get('uris')!.split(',').map((u) => { const m = u.match(/^spotify:track:([A-Za-z0-9]+)$/); if (!m) throw new Error(`bad uri ${u}`); return m[1] })
+    if (url.includes('/v1/me/library/contains')) return ok(uris().map((id) => f.liked.has(id)))
+    if (url.includes('/v1/me/library') && init.method === 'PUT') { for (const id of uris()) f.liked.add(id); return new Response(null, { status: 200 }) }
     if (url.includes('ntfy')) return new Response('ok')
     throw new Error(`unexpected fetch ${url}`)
   })
@@ -309,7 +310,7 @@ describe('runSync', () => {
   it('a failed like leaves matched tracks queued, never lost', async () => {
     const store = memStore()
     const inner = fakeFetch(fake)
-    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => (String(input).includes('/v1/me/tracks') ? new Response('{"error":{"message":"boom"}}', { status: 503 }) : inner(input, init))))
+    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => (String(input).includes('/v1/me/library') ? new Response('{"error":{"message":"boom"}}', { status: 503 }) : inner(input, init))))
     const r = await runSync(env, store, { notify: async () => {} })
     expect(r.error).toMatch(/503/)
     expect(Object.keys(store.state!.pending).sort()).toEqual(['u1', 'u3']) // matched but not liked → still pending
