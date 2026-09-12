@@ -64,9 +64,10 @@ export async function spotifyMe(token: string): Promise<{ id: string; displayNam
   return { id: j.id, displayName: j.display_name ?? j.id }
 }
 
-/** Track search in the user's own market so every hit is actually playable/saveable. */
+/** Track search. No `market` param: with a user token Spotify applies the account's own
+ *  country anyway, and `market=from_token` would need the user-read-private scope. */
 export async function searchTracks(token: string, q: string, limit = 6): Promise<SpotifyCandidate[]> {
-  const j = await api(token, `/search?${new URLSearchParams({ q, type: 'track', limit: String(limit), market: 'from_token' })}`)
+  const j = await api(token, `/search?${new URLSearchParams({ q, type: 'track', limit: String(limit) })}`)
   const items: any[] = j?.tracks?.items ?? []
   return items.map((t) => ({ id: t.id, name: t.name, artists: (t.artists ?? []).map((a: any) => a.name) }))
 }
