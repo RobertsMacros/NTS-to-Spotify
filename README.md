@@ -101,6 +101,7 @@ curl -H "Authorization: Bearer $SYNC_TOKEN" https://nts-to-spotify.<you>.workers
 | --- | --- |
 | `npm run sync` | sync what's new since last time |
 | `npm run sync:full` | re-walk every NTS saved track and retry every miss |
+| `npm run why` | for every miss, the Spotify hits it saw and why each was rejected |
 | `npm run pin -- <uid> <spotify track url>` | a track it couldn't find: tell it which one, it likes it and remembers |
 | `npm test` | 32 tests: the matcher's gates and end-to-end runs against a fake NTS + Spotify |
 
@@ -113,7 +114,9 @@ Every Spotify search hit has to clear all of these, or it's a miss:
 - **Same version.** Words that name a version — remix, edit, dub, live, instrumental,
   extended, radio, VIP, rework… — must be identical on both sides. "Original Mix" and
   "Remaster" count as the same recording.
-- **Near-exact title** after normalising accents, punctuation and where "feat." sits.
+- **Near-exact title** after normalising accents, punctuation and where "feat." sits
+  (any script — Japanese titles are fine). A title NTS cut short with "…" matches by
+  prefix, but only a Spotify title with no version tag of its own.
 - **The artist matches** (so a cover is rejected).
 
 Nothing clears the bar → recorded as *not on Spotify*, one push, and it's quietly

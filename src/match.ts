@@ -32,9 +32,15 @@ export function normalise(s: string): string {
     .replace(/&/g, ' and ')
     .replace(/\b(featuring|feat|ft)\.?(?=\s|$)/g, ' feat ')
     .replace(/['’`]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ') // keep letters/digits of every script (Japanese titles are common on NTS)
     .trim()
     .replace(/\s+/g, ' ')
+}
+
+/** NTS truncates long titles with "..." / "…". Returns the untruncated prefix, or null. */
+export function truncatedPrefix(title: string): string | null {
+  const m = title.trim().match(/^(.*?)\s*(?:\.\.\.|…)$/)
+  return m && m[1].trim() ? m[1].trim() : null
 }
 
 /** Remove "feat. X" / "(with X)" guest clauses only — Spotify tends to put guests in the
@@ -138,9 +144,19 @@ export interface MatchScore { score: number; title: number; artist: number; same
 
 /** Confidence that `c` is the very same version NTS logged as `t`. */
 export function scoreCandidate(t: NtsTrack, c: SpotifyCandidate): MatchScore {
+  const artist = artistScore(t.artists, c.artists)
+  const prefix = truncatedPrefix(t.title)
+  if (prefix) {
+    // NTS cut the title short: accept only a Spotify title that starts with what we have AND
+    // carries no version tag of its own (a remix hidden past the "..." can't be ruled out otherwise).
+    const p = normalise(stripFeat(prefix))
+    const full = normalise(stripFeat(c.name))
+    const title = p.length >= 8 && full.startsWith(p) ? 1 : 0
+    const sameVersion = versionTags(c.name).size === 0
+    return { sameVersion, title, artist, score: sameVersion ? title * 0.6 + artist * 0.4 : 0 }
+  }
   const sameVersion = sameSet(versionTags(t.title), versionTags(c.name))
   const title = Math.max(similarity(normalise(stripFeat(t.title)), normalise(stripFeat(c.name))), similarity(coreTitle(t.title), coreTitle(c.name)))
-  const artist = artistScore(t.artists, c.artists)
   return { sameVersion, title, artist, score: sameVersion ? title * 0.6 + artist * 0.4 : 0 }
 }
 
@@ -161,7 +177,7 @@ export function pickBest(t: NtsTrack, cands: SpotifyCandidate[], gates = GATES):
 /** Search strings to try in order — fielded first (precise), then free text with the same
  *  words. Each hit is still gated by pickBest, so a broader query can't pick a wrong track. */
 export function buildQueries(t: NtsTrack): string[] {
-  const title = stripFeat(t.title).trim()
+  const title = stripFeat(truncatedPrefix(t.title) ?? t.title).trim()
   const artists = splitArtists(t.artists)
   const lead = artists[0] ?? ''
   const q = (s: string) => s.replace(/"/g, '').replace(/\s+/g, ' ').trim()

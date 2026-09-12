@@ -5,7 +5,7 @@
  * track — and if nothing clears the bar we say "not found" rather than settling.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { buildQueries, normalise, parseSpotifyTrackId, pickBest, scoreCandidate, splitArtists, stripFeat, versionTags, type NtsTrack, type SpotifyCandidate } from '../src/match'
+import { buildQueries, normalise, parseSpotifyTrackId, pickBest, scoreCandidate, splitArtists, stripFeat, truncatedPrefix, versionTags, type NtsTrack, type SpotifyCandidate } from '../src/match'
 import { clampCap, emptyState, isDue, pinMatches, runSync, type SyncState, type SyncStore } from '../src/sync'
 
 const nts = (title: string, artists: string[], uid = 't1'): NtsTrack => ({ uid, title, artists, savedAt: '2026-09-01T00:00:00.000Z' })
@@ -22,6 +22,22 @@ describe('normalisation', () => {
     expect(stripFeat('Song feat. Guest')).toBe('Song')
     expect(stripFeat('Song (with Guest)')).toBe('Song')
     expect(stripFeat('Song (Dub Mix)')).toBe('Song (Dub Mix)')
+  })
+  it('keeps non-Latin scripts instead of blanking them', () => {
+    expect(normalise('不失者 – すきにやればいい')).toBe('不失者 すきにやればいい')
+    expect(normalise('甘いひびき = Sweet Things')).toBe('甘いひびき sweet things')
+    expect(pickBest(nts('すきにやればいい', ['不失者']), [sp('a', 'すきにやればいい', ['不失者'])])?.pick.id).toBe('a')
+    expect(pickBest(nts('すきにやればいい', ['不失者']), [sp('b', 'すきにやればいい (Live)', ['不失者'])])).toBeNull()
+  })
+  it('a title NTS truncated with "..." matches by prefix, but never a tagged version', () => {
+    expect(truncatedPrefix('All Flowers In Time Bend...')).toBe('All Flowers In Time Bend')
+    expect(truncatedPrefix('All Flowers In Time Bend…')).toBe('All Flowers In Time Bend')
+    expect(truncatedPrefix('Whole Title')).toBeNull()
+    const t = nts('All Flowers In Time Bend...', ['Elizabeth Fraser', 'Jeff Buckley'])
+    expect(pickBest(t, [sp('a', 'All Flowers in Time Bend Towards the Sun', ['Jeff Buckley', 'Elizabeth Fraser'])])?.pick.id).toBe('a')
+    expect(pickBest(t, [sp('r', 'All Flowers in Time Bend Towards the Sun (Remix)', ['Jeff Buckley'])])).toBeNull()
+    expect(pickBest(t, [sp('x', 'All Flowers Bloom', ['Jeff Buckley'])])).toBeNull()
+    expect(buildQueries(t)[0]).toBe('track:"All Flowers In Time Bend" artist:"Elizabeth Fraser"')
   })
   it('splits joint artist credits', () => {
     expect(splitArtists(['Four Tet & Burial', 'Thom Yorke x Fred again..'])).toEqual(['Four Tet', 'Burial', 'Thom Yorke', 'Fred again..'])
