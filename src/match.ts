@@ -110,8 +110,12 @@ const NEUTRAL = new Set(['original', 'mix', 'remaster', 'remastered', 'mono', 's
  * " - " separator (minus neutral words like "original"/"remaster"), plus any qualifier
  * word in the main title ("Song Remix"). Two titles are the same version iff equal.
  */
+/** A bracketed phrase at the START of a title is part of the title ("(I Don't Need To) Wonder"),
+ *  not a version tag — unbracket it so both matching and tagging treat it as words. */
+const unbracketLeading = (t: string) => t.replace(/^\s*[([{]([^)\]}]*)[)\]}]\s*/, (_, inner: string) => `${inner} `)
+
 export function versionTags(title: string): Set<string> {
-  const t = stripFeat(title)
+  const t = unbracketLeading(stripFeat(title))
   const tags = new Set<string>()
   const segs: string[] = []
   const main = t
@@ -130,7 +134,7 @@ const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].
 
 /** Title similarity with bracketed/dashed qualifiers removed — the "core" title. */
 function coreTitle(title: string): string {
-  return normalise(stripFeat(title).replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, ''))
+  return normalise(unbracketLeading(stripFeat(title)).replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, ''))
 }
 
 /** Damerau–Levenshtein distance (transposition counts as one edit). */
@@ -222,7 +226,7 @@ export function buildQueries(t: NtsTrack): string[] {
   const out: string[] = []
   for (const v of titleVariants(truncatedPrefix(t.title) ?? t.title)) {
     const title = stripFeat(v).trim()
-    const core = title.replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, '').trim()
+    const core = unbracketLeading(title).replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s+[-–—]\s+.*$/, '').trim()
     if (lead) out.push(`track:"${q(title)}" artist:"${q(lead)}"`)
     if (lead && core && core !== title) out.push(`track:"${q(core)}" artist:"${q(lead)}"`)
     if (lead) out.push(q(`${title} ${lead}`))

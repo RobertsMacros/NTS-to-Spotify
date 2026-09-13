@@ -126,10 +126,13 @@ describe('queries + ids', () => {
     const q = buildQueries(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']))
     expect(q.some((x) => /[()]/.test(x))).toBe(false)
     expect(q[0]).toBe(`track:"I Don't Need To Wonder" artist:"Black Hearted Brother"`)
-    expect(q[1]).toBe(`track:"Wonder" artist:"Black Hearted Brother"`)
-    // …but the gate still demands the bracketed part on the Spotify side
-    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', 'Wonder', ['Black Hearted Brother'])])).toBeNull()
+    expect(q[1]).toBe(`I Don't Need To Wonder Black Hearted Brother`)
+    // a LEADING bracket is title text, not a version: with or without brackets on Spotify's side is the same track
+    expect([...versionTags("(I Don't Need To) Wonder")]).toEqual([])
     expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', "(I Don't Need To) Wonder", ['Black Hearted Brother'])])?.pick.id).toBe('w')
+    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', "I Don't Need to Wonder", ['Black Hearted Brother'])])?.pick.id).toBe('w')
+    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', 'Wonder', ['Black Hearted Brother'])])).toBeNull()
+    expect(pickBest(nts("(I Don't Need To) Wonder", ['Black Hearted Brother']), [sp('w', "(I Don't Need To) Wonder (Live)", ['Black Hearted Brother'])])).toBeNull()
     const e = buildQueries(nts('甘いひびき = Sweet Things', ['Ai Aso']))
     expect(e).toContain('track:"甘いひびき" artist:"Ai Aso"')
     expect(e).toContain('track:"Sweet Things" artist:"Ai Aso"')
