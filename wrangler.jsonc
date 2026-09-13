@@ -12,5 +12,5 @@
   "main": "src/worker.ts",
   "compatibility_date": "2025-06-01",
   "triggers": { "crons": ["*/15 * * * *"] },
-  "kv_namespaces": [{ "binding": "STATE", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }]
+  "kv_namespaces": [{ "binding": "STATE", "id": "ba04089b1d2a4dd2acea624f38a08adc" }]
 }
