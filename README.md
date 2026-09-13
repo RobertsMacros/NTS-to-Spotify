@@ -73,17 +73,20 @@ launchctl load ~/Library/LaunchAgents/com.robertsmacros.ntstospotify.plist
 It runs every 15 minutes while the Mac is awake and logs to
 `~/Library/Logs/nts-to-spotify.log`.
 
-### Or run it on Cloudflare (nothing switched on)
+### Or run it on Cloudflare (nothing switched on) — recommended
 
-Free tier is plenty. One-off:
+Free tier is plenty. One-off, from the project folder:
 
 ```bash
-npx wrangler login
-npx wrangler kv namespace create STATE     # paste the id it prints into wrangler.jsonc
-npm run deploy                             # uploads .dev.vars as secrets + deploys the cron
+npx wrangler login                         # opens the browser once
+npx wrangler kv namespace create STATE     # prints an id — paste it into wrangler.jsonc
+npm run deploy                             # uploads .dev.vars as secrets + deploys the 15-min cron
+npm run state:push                         # copies this Mac's state up, so it carries on from here
 ```
 
-Then it just runs. To look at it from anywhere (the token is `SYNC_TOKEN` in `.dev.vars`):
+Then it just runs. `npm run status -- https://nts-to-spotify.<you>.workers.dev` shows what it's
+done (the URL is printed by `npm run deploy`). Or call it from anywhere (the token is `SYNC_TOKEN`
+in `.dev.vars`):
 
 | | |
 | --- | --- |
