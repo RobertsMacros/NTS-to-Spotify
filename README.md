@@ -102,6 +102,7 @@ curl -H "Authorization: Bearer $SYNC_TOKEN" https://nts-to-spotify.<you>.workers
 | `npm run sync` | sync what's new since last time |
 | `npm run sync:full` | re-walk every NTS saved track and retry every miss |
 | `npm run why` | for every miss, the Spotify hits it saw and why each was rejected |
+| `npm run find -- "<artist>" "<title>"` | search Spotify from the terminal (when NTS has the title wrong) and get links to pin |
 | `npm run pin -- <uid> <spotify track url>` | a track it couldn't find: tell it which one, it likes it and remembers |
 | `npm test` | 32 tests: the matcher's gates and end-to-end runs against a fake NTS + Spotify |
 

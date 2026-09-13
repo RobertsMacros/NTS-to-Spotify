@@ -15,7 +15,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "deploy": "npx wrangler secret bulk .dev.vars && npx wrangler deploy",
-    "why": "tsx scripts/why.ts"
+    "why": "tsx scripts/why.ts",
+    "find": "tsx scripts/find.ts"
   },
   "devDependencies": {
     "@types/node": "22.20.0",
