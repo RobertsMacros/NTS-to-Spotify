@@ -16,3 +16,7 @@ NTS_NOTIFY_URL=https://ntfy.sh/your-private-topic-name
 
 # Worker only: bearer token that protects /status, /run and /pin (the setup script generates one).
 SYNC_TOKEN=
+
+# Worker only: written by `npm run deploy` (the KV namespace it found or created, and the Worker's address).
+# KV_NAMESPACE_ID=
+# WORKER_URL=

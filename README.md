@@ -3,9 +3,9 @@
 *A Roberts macro — no macro too micro.*
 
 Heart a track on NTS (the app or nts.live) and it turns up in your Spotify **Liked
-Songs**. The exact recording only: a remix, edit, dub, live take or cover is never
-substituted. If Spotify doesn't have that version, nothing is added and you get a push
-saying so.
+Songs** within fifteen minutes. The exact recording only: a remix, edit, dub, live
+take or cover is never substituted. If Spotify doesn't have that version, nothing is
+added and your phone tells you so.
 
 ```
 NTS "My Tracks"  ──▶  match (same version? same artist? near-exact title?)  ──▶  Spotify Liked Songs
@@ -13,22 +13,30 @@ NTS "My Tracks"  ──▶  match (same version? same artist? near-exact title?)
                                           └──▶  not found → push: "Not on Spotify: Artist – Title"
 ```
 
-Two ways to run it. On your Mac, on a timer (simplest). Or on a free Cloudflare Worker,
-every 15 minutes, with nothing switched on.
+## What you need
 
-Giving it to a friend? Send them the one-page guide: `docs/guide.html`.
+- **A Mac** and about fifteen minutes. Everything below happens in Terminal, one line
+  at a time.
+- **Spotify Premium.** Spotify requires it for personal apps like this one.
+- **Your NTS email and password.** Signed up with Google or Apple? Use *Forgot
+  password* on nts.live once to set one for the same email.
+- **A free Cloudflare account** for the last step, so it runs with your laptop shut.
+  (Skip it if you'd rather it ran on the Mac.)
 
-## Install (about five minutes)
+## Setup
 
-**You need**
+### 1. Install Node
 
-- Node 18 or newer (`node -v`). Get it from <https://nodejs.org> if not.
-- A Spotify account with **Premium** (Spotify requires it for personal API apps since
-  February 2026).
-- Your NTS email and **password**. If you signed up to NTS with Google or Apple, use
-  *Forgot password* on nts.live once to set one for the same email.
+Download the LTS version from <https://nodejs.org> and run the installer. Then open
+Terminal and check it took:
 
-**1. Get the code**
+```bash
+node -v
+```
+
+Any number starting 18 or higher is fine.
+
+### 2. Get the code
 
 ```bash
 git clone https://github.com/RobertsMacros/NTS-to-Spotify.git
@@ -36,82 +44,85 @@ cd NTS-to-Spotify
 npm install
 ```
 
-**2. Create a Spotify app** at <https://developer.spotify.com/dashboard>: *Create app* →
-any name → type *Web API* → redirect URI exactly `http://127.0.0.1:8888/callback` → save.
-Copy its *Client ID* and *Client secret*.
+If the first line asks to install "command line developer tools", say yes, wait for
+it to finish, then run the line again.
 
-**3. Connect both accounts**
+### 3. Create your Spotify app
+
+Go to <https://developer.spotify.com/dashboard>, log in with your Spotify account, and
+click **Create app**. Give it any name, tick **Web API**, and set the Redirect URI to
+exactly:
+
+```
+http://127.0.0.1:8888/callback
+```
+
+Save, open the app's settings, and keep the **Client ID** and **Client secret** to
+hand for the next step.
+
+### 4. Connect your accounts
 
 ```bash
 npm run setup
 ```
 
-It signs in to NTS and shows your three most recent saved tracks (so you know it's the
-right account), opens Spotify's consent page in your browser, optionally takes an
-[ntfy](https://ntfy.sh) topic for the "not on Spotify" pushes, and writes everything to
-the gitignored `.dev.vars`.
+It asks for your NTS email and password, then shows your three most recent NTS saves
+so you know it's the right account. It opens Spotify in your browser to approve the
+app, then asks for the Client ID and secret. Finally it offers a push-notification
+topic, which is optional but worth having: install the free [ntfy](https://ntfy.sh)
+app, subscribe to a made-up private topic name in it, and type that name here.
 
-**4. First sync**
+Your passwords stay on your Mac. The setup writes its keys into a file called
+`.dev.vars` that never leaves the folder.
+
+### 5. First sync
 
 ```bash
 npm run sync
 ```
 
-Walks your whole NTS history, prints every match (`✓`) and every miss (`✗`), then a
-summary. Open Spotify → Liked Songs and check.
+It walks through everything you've ever saved on NTS and prints a line per track: a
+`✓` with the Spotify match, or a `✗` for anything Spotify doesn't have. Open Liked
+Songs on Spotify and enjoy the scroll.
 
-## Use
+### 6. Make it run by itself
 
-### Keep it running on your Mac
+This puts it on Cloudflare's free tier, where it checks NTS every fifteen minutes
+whether or not your Mac is on. A browser tab opens the first time to log in or create
+the account; everything else is automatic.
 
-Copy `scripts/com.robertsmacros.ntstospotify.plist.example` to
+```bash
+npm run deploy
+npm run state:push
+```
+
+The second command copies what your Mac already synced up to Cloudflare, so it
+carries on from there rather than starting over. `npm run status` shows what it's
+done since.
+
+**Prefer to keep it on the Mac?** Copy
+`scripts/com.robertsmacros.ntstospotify.plist.example` to
 `~/Library/LaunchAgents/com.robertsmacros.ntstospotify.plist`, edit the two paths in
-it, then:
+it, then `launchctl load` that file. It runs every fifteen minutes while the Mac is
+awake and logs to `~/Library/Logs/nts-to-spotify.log`.
 
-```bash
-launchctl load ~/Library/LaunchAgents/com.robertsmacros.ntstospotify.plist
-```
+## Afterwards
 
-It runs every 15 minutes while the Mac is awake and logs to
-`~/Library/Logs/nts-to-spotify.log`.
+Heart something on NTS, in the app or on the website, and it's in Liked Songs within
+fifteen minutes. You get a push if a track isn't on Spotify, and one if the sync ever
+breaks (for example after you change your NTS password: run `npm run setup` again,
+then `npm run deploy`). Otherwise it's silent.
 
-### Or run it on Cloudflare (nothing switched on) — recommended
-
-Free tier is plenty. One-off, from the project folder:
-
-```bash
-npx wrangler login                         # opens the browser once
-npx wrangler kv namespace create STATE     # answer "yes" and Wrangler writes the id into wrangler.jsonc
-npm run deploy                             # uploads .dev.vars as secrets + deploys the 15-min cron
-npm run state:push                         # copies this Mac's state up, so it carries on from here
-```
-
-Then it just runs. `npm run status -- https://nts-to-spotify.<you>.workers.dev` shows what it's
-done (the URL is printed by `npm run deploy`). Or call it from anywhere (the token is `SYNC_TOKEN`
-in `.dev.vars`):
+A few commands for the rare case where NTS has a title slightly wrong. Run them from
+the `NTS-to-Spotify` folder:
 
 | | |
 | --- | --- |
-| `GET /status` | last run, synced / pending counts, 20 most recent, the **not on Spotify** list |
-| `POST /run` | run now (`?full=1` re-walks everything; `?max=40` more look-ups per run on the paid plan) |
-| `POST /pin` `{"<ntsUid>":"<spotify track url>"}` | resolve a track by hand |
-
-```bash
-curl -H "Authorization: Bearer $SYNC_TOKEN" https://nts-to-spotify.<you>.workers.dev/status
-```
-
-### Everyday commands
-
-| | |
-| --- | --- |
-| `npm run sync` | sync what's new since last time |
-| `npm run sync:full` | re-walk every NTS saved track and retry every miss |
-| `npm run why` | for every miss, the Spotify hits it saw and why each was rejected |
-| `npm run find -- "<artist>" "<title>"` | search Spotify from the terminal (when NTS has the title wrong) and get links to pin |
-| `npm run pin -- <uid> <spotify track url>` | a track it couldn't find: tell it which one, it likes it and remembers |
-| `npm test` | 32 tests: the matcher's gates and end-to-end runs against a fake NTS + Spotify |
-
-The uid for `pin` is printed under "not on Spotify" by `npm run sync` (or in `/status`).
+| `npm run why` | For every track it couldn't match, shows what Spotify returned and why each hit was rejected. |
+| `npm run find -- "Artist" "Title"` | Searches Spotify from the terminal and gives you links. |
+| `npm run pin -- <id> <link>` | Tells it which track you meant. It likes it and stops asking. The id is printed next to the track by `why`. |
+| `npm run state:push` | After pinning, sends the update up to Cloudflare. |
+| `npm run sync:full` | Re-walk every NTS save and retry every miss now, rather than on the usual schedule. |
 
 ## How it decides a match
 
@@ -121,28 +132,30 @@ Every Spotify search hit has to clear all of these, or it's a miss:
   extended, radio, VIP, rework… — must be identical on both sides. "Original Mix" and
   "Remaster" count as the same recording.
 - **Near-exact title** after normalising accents, punctuation and where "feat." sits
-  (any script — Japanese titles are fine). A title NTS cut short with "…" matches by
+  (any script, so Japanese titles are fine). A title NTS cut short with "…" matches by
   prefix, but only a Spotify title with no version tag of its own.
-- **The artist matches** (so a cover is rejected).
+- **The artist matches.** A cover is rejected; an artist name one or two keystrokes
+  off (a tracklist typo) is not, provided the title is exact.
 
 Nothing clears the bar → recorded as *not on Spotify*, one push, and it's quietly
-re-checked after 1, 3, 7 and 30 days in case Spotify adds it. It never falls back to a
-lookalike.
+re-checked after 1, 3, 7 and 30 days in case Spotify adds it. It never falls back to
+a lookalike.
 
 ## How it works
 
 - **NTS** has no public API for saved tracks. Its website reads them from a Firebase
-  function; this does exactly what the site does with a long-lived refresh token for your
-  account. Saving in the app and on the web both land in the same My NTS account.
-- **State** is one JSON blob (`~/.config/nts-to-spotify/state.json` locally, a KV key on
-  the Worker): a `pending` queue, `synced`, `unmatched`, and two NTS cursors. Each run
-  reads NTS only down to the newest track it already knows — normally one page.
-- **Budgeted.** The Worker reads at most 6 NTS pages and does 10 look-ups per run (newest
-  saves first) to stay inside Cloudflare's per-invocation limit; a first-run backlog
-  drains over successive ticks. The local runner has no cap.
+  function; this does exactly what the site does with a long-lived refresh token for
+  your account. Saving in the app and on the web both land in the same My NTS account.
+- **State** is one JSON blob (`~/.config/nts-to-spotify/state.json` on the Mac, a KV
+  key on Cloudflare): a `pending` queue, `synced`, `unmatched`, and two NTS cursors.
+  Each run reads NTS only down to the newest track it already knows — normally one page.
+- **Budgeted.** The Worker reads at most 6 NTS pages and does 10 look-ups per run
+  (newest saves first) to stay inside Cloudflare's per-invocation limit; a first-run
+  backlog drains over successive ticks. The Mac runner has no cap.
 - **Loss-proof.** A track leaves the queue only once its outcome is recorded; a failed
   Spotify call leaves it queued. A state-read failure aborts the run without writing.
 - It only ever **adds** to Liked Songs. Un-saving on NTS does not remove from Spotify.
+- **Cost:** nothing. Cloudflare's free tier allows 100,000 runs a day; this uses 96.
 
 ## Troubleshooting
 
@@ -151,16 +164,17 @@ lookalike.
 | `NTS sign-in failed: INVALID_LOGIN_CREDENTIALS` | Google/Apple sign-up → set a password via *Forgot password* on nts.live |
 | Spotify consent page says "INVALID_CLIENT: Invalid redirect URI" | the app's redirect URI must be exactly `http://127.0.0.1:8888/callback` |
 | Every run: `Spotify /search: HTTP 403` | Spotify Premium lapsed (required for developer apps) |
-| Push "NTS to Spotify sync failed: NTS token refresh …" | you changed your NTS password — `npm run setup` again |
-| A track is a miss but you know it's on Spotify | `npm run pin -- <uid> <spotify track url>` |
+| Push "NTS to Spotify sync failed: NTS token refresh …" | you changed your NTS password — `npm run setup` again, then `npm run deploy` |
+| A track is a miss but you know it's on Spotify | `npm run why`, then `npm run pin -- <id> <link>` |
 
-Revoke access any time: change your NTS password; remove the app at
-<https://www.spotify.com/account/apps/>.
+To stop it for good: delete the app at <https://www.spotify.com/account/apps/> and
+change your NTS password.
 
 ## Files
 
-- `src/match.ts` — the matcher (version tags, gates). Pure; tests in `test/sync.test.ts`.
+- `src/match.ts` — the matcher (version tags, gates). Pure; tests in `test/sync.test.ts` (`npm test`).
 - `src/nts.ts`, `src/spotify.ts` — the two clients.
 - `src/sync.ts` — orchestration, state, retries, pins, pushes.
-- `src/worker.ts` — the optional Cloudflare host (cron + `/status`, `/run`, `/pin`).
-- `scripts/setup.mjs` — one-off account linking. `scripts/sync.ts`, `scripts/pin.ts` — local commands.
+- `src/worker.ts` — the optional Cloudflare host (cron + `/status`, `/run`, `/pin`, bearer-token protected).
+- `scripts/setup.mjs` — one-off account linking. `scripts/cf.mjs` — deploy, state push, status.
+  `scripts/sync.ts`, `why.ts`, `find.ts`, `pin.ts` — everyday commands.

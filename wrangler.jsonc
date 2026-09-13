@@ -1,10 +1,12 @@
 {
   // Optional Cloudflare Worker host — the sync then runs every 15 minutes with no computer on.
   //
-  //   1. npx wrangler kv namespace create STATE     → paste the id below
-  //   2. npm run setup                              → writes the secrets to .dev.vars
-  //   3. npm run deploy                             → uploads the secrets + deploys
-  //   4. curl -H "Authorization: Bearer $SYNC_TOKEN" https://nts-to-spotify.<you>.workers.dev/status
+  //   npm run setup      → writes the secrets to .dev.vars
+  //   npm run deploy     → logs in, finds/creates the STATE KV namespace, uploads secrets, deploys
+  //   npm run state:push → copies this Mac's state up
+  //
+  // The KV id below stays a placeholder on purpose: it is per Cloudflare account, so
+  // scripts/cf.mjs fills it in from .dev.vars (KV_NAMESPACE_ID) at deploy time.
   //
   // Secrets: NTS_REFRESH_TOKEN · SPOTIFY_CLIENT_ID · SPOTIFY_CLIENT_SECRET · SPOTIFY_REFRESH_TOKEN
   //          SYNC_TOKEN (bearer token for /status, /run, /pin) · NTS_NOTIFY_URL (optional ntfy topic)

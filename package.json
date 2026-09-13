@@ -14,11 +14,11 @@
     "pin": "tsx scripts/pin.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "npx wrangler secret bulk .dev.vars && npx wrangler deploy",
+    "deploy": "node scripts/cf.mjs deploy",
     "why": "tsx scripts/why.ts",
     "find": "tsx scripts/find.ts",
-    "state:push": "npx wrangler kv key put --binding STATE --remote nts-spotify:state --path \"${NTS_SPOTIFY_STATE:-$HOME/.config/nts-to-spotify/state.json}\"",
-    "status": "sh -c 'curl -s -H \"Authorization: Bearer $(grep ^SYNC_TOKEN= .dev.vars | cut -d= -f2)\" \"$0/status\"'"
+    "state:push": "node scripts/cf.mjs state:push",
+    "status": "node scripts/cf.mjs status"
   },
   "devDependencies": {
     "@types/node": "22.20.0",
