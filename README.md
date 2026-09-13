@@ -16,6 +16,8 @@ NTS "My Tracks"  ──▶  match (same version? same artist? near-exact title?)
 Two ways to run it. On your Mac, on a timer (simplest). Or on a free Cloudflare Worker,
 every 15 minutes, with nothing switched on.
 
+Giving it to a friend? Send them the one-page guide: `docs/guide.html`.
+
 ## Install (about five minutes)
 
 **You need**
@@ -79,7 +81,7 @@ Free tier is plenty. One-off, from the project folder:
 
 ```bash
 npx wrangler login                         # opens the browser once
-npx wrangler kv namespace create STATE     # prints an id — paste it into wrangler.jsonc
+npx wrangler kv namespace create STATE     # answer "yes" and Wrangler writes the id into wrangler.jsonc
 npm run deploy                             # uploads .dev.vars as secrets + deploys the 15-min cron
 npm run state:push                         # copies this Mac's state up, so it carries on from here
 ```
