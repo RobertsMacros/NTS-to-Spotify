@@ -249,9 +249,9 @@ describe('runSync', () => {
     const t0 = Date.parse('2026-09-03T00:00:00Z')
     await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 })
     fake.catalogue.push(sp('dub', 'Unreleased Dubplate', ['Nobody']))
-    const r1 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 3_600_000 }) // 1h later: not due
+    const r1 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 3 * 86_400_000 }) // 3d later: not due yet
     expect(r1.added).toBe(0)
-    const r2 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 2 * 86_400_000 }) // 2d later: due
+    const r2 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 8 * 86_400_000 }) // 8d later: due (weekly)
     expect(r2.added).toBe(1)
     expect(store.state!.unmatched.u2).toBeUndefined()
     expect(store.state!.synced.u2.spotifyId).toBe('dub')
@@ -282,7 +282,7 @@ describe('runSync', () => {
     fake.ntsTracks.push({ track_uid: 'u5', song_title: 'Xtal', artist_names: ['Aphex Twin'], created_at: '2026-09-04T00:00:00Z' })
     fake.liked.delete('xtal')
     fake.calls = []
-    const r = await runSync(env, store, { notify: async () => {}, now: () => t0 + 2 * 86_400_000, maxLookups: 1 }) // u2 is due, but u5 goes first
+    const r = await runSync(env, store, { notify: async () => {}, now: () => t0 + 8 * 86_400_000, maxLookups: 1 }) // u2 is due (weekly), but u5 goes first
     expect(r.added).toBe(1)
     expect(store.state!.synced.u5).toBeDefined()
     expect(store.state!.unmatched.u2.tries).toBe(1)
@@ -405,16 +405,22 @@ describe('runSync', () => {
     expect(store.state!.synced.u2.matched).toBe('pinned')
   })
 
-  it('retry ladder: now, then 1 / 3 / 7 / 30 days, then never', () => {
+  it('a miss is rechecked about weekly, indefinitely — never every run, never abandoned', () => {
     const base = { title: 't', artists: ['a'], savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z' }
     const now = Date.parse('2026-09-01T00:10:00Z')
     const day = 86_400_000
-    expect(isDue({ ...base, tries: 0 }, now)).toBe(true)
-    expect(isDue({ ...base, tries: 1 }, now)).toBe(false)
-    expect(isDue({ ...base, tries: 1 }, now + day)).toBe(true)
-    expect(isDue({ ...base, tries: 4 }, now + 29 * day)).toBe(false)
-    expect(isDue({ ...base, tries: 4 }, now + 30 * day)).toBe(true)
-    expect(isDue({ ...base, tries: 5 }, now + 365 * day)).toBe(false)
+    expect(isDue({ ...base, tries: 0 }, now)).toBe(true) // an errored look-up isn't a real try — retried straight away
+    expect(isDue({ ...base, tries: 1 }, now)).toBe(false) // just missed — not due yet
+    expect(isDue({ ...base, tries: 1 }, now + 6 * day)).toBe(false)
+    expect(isDue({ ...base, tries: 1 }, now + 7 * day)).toBe(true)
+    // no cutoff, ever — a track missed a year ago is still checked weekly
+    expect(isDue({ ...base, tries: 50, lastTried: '2026-09-01T00:00:00Z' }, now + 365 * day)).toBe(true)
+    expect(isDue({ ...base, tries: 50, lastTried: new Date(now + 364 * day).toISOString() }, now + 365 * day)).toBe(false)
+  })
+  it('a permanent entry (no searchable title) is never due, however many tries or however long', () => {
+    const base = { title: '', artists: ['a'], savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z', permanent: true as const }
+    expect(isDue({ ...base, tries: 0 }, Date.parse('2026-09-01T00:00:00Z'))).toBe(false)
+    expect(isDue({ ...base, tries: 1 }, Date.parse('2027-09-01T00:00:00Z'))).toBe(false)
   })
 
   it('records an NTS entry with no title as unmatched (never retried, pin by hand)', async () => {
@@ -422,9 +428,12 @@ describe('runSync', () => {
     const store = memStore()
     await runSync(env, store, { notify: async () => {} })
     expect(store.state!.unmatched.u9?.lastError).toMatch(/no title/)
+    expect(store.state!.unmatched.u9?.permanent).toBe(true)
     fake.calls = []
     const r = await runSync(env, store, { notify: async () => {} })
     expect(r.scanned).toBe(0)
+    expect(fake.calls.some((c) => c.includes('/v1/search'))).toBe(false) // never re-searched — permanent, pin by hand
+    expect(r.unmatchedTracks.find((u) => u.uid === 'u9')).toBeDefined() // still listed, so it CAN be pinned
   })
 
   it('reports missing configuration instead of throwing', async () => {

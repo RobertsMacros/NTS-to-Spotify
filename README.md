@@ -138,8 +138,9 @@ Every Spotify search hit has to clear all of these, or it's a miss:
   off (a tracklist typo) is not, provided the title is exact.
 
 Nothing clears the bar → recorded as *not on Spotify*, one push, and it's quietly
-re-checked after 1, 3, 7 and 30 days in case Spotify adds it. It never falls back to
-a lookalike.
+rechecked about once a week, indefinitely, in case Spotify adds it — not on every run,
+but not forgotten either. It never falls back to a lookalike. (A track with no title on
+NTS has nothing to search for, so it's never auto-rechecked — pin it by hand instead.)
 
 ## How it works
 

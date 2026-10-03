@@ -6,7 +6,8 @@
  *
  *   pending    tracks fetched from NTS, not yet looked up on Spotify (a queue)
  *   synced     NTS uid → Spotify id (done)
- *   unmatched  not on Spotify — retried quietly after 1, 3, 7 and 30 days, or pinned by hand
+ *   unmatched  not on Spotify — rechecked quietly about once a week in case Spotify adds it,
+ *              or pinned by hand; a track with no searchable title is marked permanent (never retried)
  *   newestSeen the savedAt of the newest NTS track ever fetched (incremental walk stops there)
  *   backfill   resume cursor for older history: walk below `before` (down to `until`, or the bottom)
  *
@@ -49,7 +50,7 @@ export async function notify(env: SyncEnv, title: string, body: string): Promise
 
 export interface PendingEntry { title: string; artists: string[]; savedAt: string }
 export interface SyncedEntry { spotifyId: string; at: string; title: string; artists: string[]; matched: string; score: number; savedAt: string }
-export interface UnmatchedEntry { title: string; artists: string[]; savedAt: string; tries: number; lastTried: string; lastError?: string }
+export interface UnmatchedEntry { title: string; artists: string[]; savedAt: string; tries: number; lastTried: string; lastError?: string; permanent?: boolean }
 export interface LastRun { at: string; ms: number; scanned: number; added: number; alreadyLiked: number; unmatched: number; pending: number; error?: string }
 
 export interface SyncState {
@@ -93,7 +94,10 @@ export interface SyncReport extends LastRun {
 export interface UnmatchedView { uid: string; title: string; artists: string; tries: number; lastError?: string }
 
 export const STATE_KEY = 'nts-spotify:state'
-const RETRY_AFTER_MS = [1, 3, 7, 30].map((d) => d * 86_400_000) // wait before try 2, 3, 4, 5; then only on `full`
+// A miss is rechecked periodically rather than every run — about once a week, in case Spotify
+// later adds it — and that continues indefinitely: it's one extra search per retried track per
+// run, so there's no reason to ever give up on it (pin it by hand to stop sooner).
+const RETRY_INTERVAL_MS = 7 * 86_400_000
 const LOCK_MS = 3 * 60_000
 const bySavedAtDesc = <T extends { savedAt: string }>(a: [string, T], b: [string, T]) => b[1].savedAt.localeCompare(a[1].savedAt)
 const joinArtists = (a: string[]) => a.join(', ')
@@ -124,11 +128,11 @@ export function kvStore(env: { KV?: { get: (k: string, t?: string) => Promise<an
   }
 }
 
-/** Retry ladder: try 1 now; then after 1, 3, 7, 30 days; then only on `full`. */
+/** A miss is rechecked about weekly, indefinitely; a permanent one (no title to search) never is. */
 export const isDue = (u: UnmatchedEntry, now: number): boolean => {
-  if (u.tries < 1) return true
-  if (u.tries > RETRY_AFTER_MS.length) return false
-  return now - Date.parse(u.lastTried) >= RETRY_AFTER_MS[u.tries - 1]
+  if (u.permanent) return false
+  if (u.tries < 1) return true // a look-up that errored out (network) never counted as a try
+  return now - Date.parse(u.lastTried) >= RETRY_INTERVAL_MS
 }
 
 /** Try each query in turn; first hit that clears every gate wins. */
@@ -179,7 +183,7 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
         if (t.uid in state.synced || t.uid in state.unmatched || t.uid in state.pending) continue
         if (!t.title) {
           // Nothing to search for — never queued, retried only by hand (pin it).
-          state.unmatched[t.uid] = { title: '', artists: t.artists, savedAt: t.savedAt, tries: RETRY_AFTER_MS.length + 1, lastTried: new Date(now()).toISOString(), lastError: 'NTS entry has no title' }
+          state.unmatched[t.uid] = { title: '', artists: t.artists, savedAt: t.savedAt, tries: 1, lastTried: new Date(now()).toISOString(), lastError: 'NTS entry has no title', permanent: true }
           continue
         }
         state.pending[t.uid] = { title: t.title, artists: t.artists, savedAt: t.savedAt }
