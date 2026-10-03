@@ -6,8 +6,11 @@
  *
  *   pending    tracks fetched from NTS, not yet looked up on Spotify (a queue)
  *   synced     NTS uid → Spotify id (done)
- *   unmatched  not on Spotify — rechecked quietly about once a week in case Spotify adds it,
- *              or pinned by hand; a track with no searchable title is marked permanent (never retried)
+ *   unmatched  not on Spotify — rechecked at 1, 3, 7 and 30 days in case Spotify adds it; once
+ *              that ladder is exhausted it rests until a fresh NTS "like" wakes it (checked
+ *              right away, then again at 7 and 30 days, resting and waking each time after) —
+ *              so a stale miss isn't checked forever once you stop using NTS. A track with no
+ *              searchable title is marked permanent and is never auto-rechecked; pin it by hand.
  *   newestSeen the savedAt of the newest NTS track ever fetched (incremental walk stops there)
  *   backfill   resume cursor for older history: walk below `before` (down to `until`, or the bottom)
  *
@@ -50,7 +53,23 @@ export async function notify(env: SyncEnv, title: string, body: string): Promise
 
 export interface PendingEntry { title: string; artists: string[]; savedAt: string }
 export interface SyncedEntry { spotifyId: string; at: string; title: string; artists: string[]; matched: string; score: number; savedAt: string }
-export interface UnmatchedEntry { title: string; artists: string[]; savedAt: string; tries: number; lastTried: string; lastError?: string; permanent?: boolean }
+export interface UnmatchedEntry {
+  title: string
+  artists: string[]
+  savedAt: string
+  tries: number // diagnostic only — how many times it's actually been searched for
+  lastTried: string
+  lastError?: string
+  /** No searchable title on NTS — never auto-rechecked (nothing to search for); pin it by hand. */
+  permanent?: boolean
+  /** The retry ladder below is exhausted — only a fresh NTS "like" (new track arriving) wakes it. */
+  dormant?: boolean
+  /** How many waits of the current ladder (fresh or wake) have already elapsed. */
+  rung?: number
+  /** false/absent = still on the original 1,3,7,30-day ladder; true = woken at least once, now
+   *  cycling the shorter 7,30-day ladder each time a fresh like wakes it again. */
+  awake?: boolean
+}
 export interface LastRun { at: string; ms: number; scanned: number; added: number; alreadyLiked: number; unmatched: number; pending: number; error?: string }
 
 export interface SyncState {
@@ -91,13 +110,18 @@ export interface SyncReport extends LastRun {
   unmatchedTracks: UnmatchedView[]
   skipped?: string
 }
-export interface UnmatchedView { uid: string; title: string; artists: string; tries: number; lastError?: string }
+export interface UnmatchedView { uid: string; title: string; artists: string; tries: number; lastError?: string; dormant?: boolean }
 
 export const STATE_KEY = 'nts-spotify:state'
-// A miss is rechecked periodically rather than every run — about once a week, in case Spotify
-// later adds it — and that continues indefinitely: it's one extra search per retried track per
-// run, so there's no reason to ever give up on it (pin it by hand to stop sooner).
-const RETRY_INTERVAL_MS = 7 * 86_400_000
+const DAY_MS = 86_400_000
+// A fresh miss is rechecked at 1, 3, 7 and 30 days. Once that's exhausted (rung reaches the end)
+// it goes dormant rather than polling forever — there's no point burning a Spotify search every
+// week on a track you might never think about again. A dormant entry wakes the moment a NEW NTS
+// "like" shows up (proof you're still using the service), gets checked right away, then cycles
+// the shorter 7/30-day ladder before resting again — repeating for as long as you keep liking
+// things. Stop using NTS and nothing is ever rechecked again, with no cost either way.
+const FRESH_LADDER_MS = [1, 3, 7, 30].map((d) => d * DAY_MS)
+const WAKE_LADDER_MS = [7, 30].map((d) => d * DAY_MS)
 const LOCK_MS = 3 * 60_000
 const bySavedAtDesc = <T extends { savedAt: string }>(a: [string, T], b: [string, T]) => b[1].savedAt.localeCompare(a[1].savedAt)
 const joinArtists = (a: string[]) => a.join(', ')
@@ -128,11 +152,29 @@ export function kvStore(env: { KV?: { get: (k: string, t?: string) => Promise<an
   }
 }
 
-/** A miss is rechecked about weekly, indefinitely; a permanent one (no title to search) never is. */
-export const isDue = (u: UnmatchedEntry, now: number): boolean => {
+/** Ladder state for the NEXT check after a miss, given the previous entry (undefined = first ever). */
+function advanceLadder(prev: UnmatchedEntry | undefined): Pick<UnmatchedEntry, 'dormant' | 'rung' | 'awake'> {
+  if (!prev) return { dormant: false, rung: 0, awake: false } // first-ever miss: start the fresh ladder
+  if (prev.dormant) return { dormant: false, rung: 0, awake: true } // a fresh like just woke it — wait 7, then 30
+  const ladder = prev.awake ? WAKE_LADDER_MS : FRESH_LADDER_MS
+  const rung = (prev.rung ?? 0) + 1
+  return { dormant: rung >= ladder.length, rung, awake: !!prev.awake }
+}
+
+/** A technical error (network, rate limit) doesn't cost ladder progress — retry at the same wait. */
+function holdLadder(prev: UnmatchedEntry | undefined): Pick<UnmatchedEntry, 'dormant' | 'rung' | 'awake'> {
+  return { dormant: !!prev?.dormant, rung: prev?.rung ?? 0, awake: !!prev?.awake }
+}
+
+/** Due now? Permanent (no title) never is. A dormant entry only wakes when `woke` — this run
+ *  found a genuinely new NTS save, proof the service is still in use. Otherwise it's whichever
+ *  ladder (fresh 1/3/7/30-day, or the shorter 7/30-day one after its first wake) applies. */
+export const isDue = (u: UnmatchedEntry, now: number, woke: boolean): boolean => {
   if (u.permanent) return false
-  if (u.tries < 1) return true // a look-up that errored out (network) never counted as a try
-  return now - Date.parse(u.lastTried) >= RETRY_INTERVAL_MS
+  if (u.dormant) return woke
+  const ladder = u.awake ? WAKE_LADDER_MS : FRESH_LADDER_MS
+  const rung = Math.min(u.rung ?? 0, ladder.length - 1)
+  return now - Date.parse(u.lastTried) >= ladder[rung]
 }
 
 /** Try each query in turn; first hit that clears every gate wins. */
@@ -146,7 +188,7 @@ async function findOnSpotify(token: string, t: NtsTrack) {
 }
 
 const unmatchedList = (s: SyncState): UnmatchedView[] =>
-  Object.entries(s.unmatched).sort(bySavedAtDesc).map(([uid, u]) => ({ uid, title: u.title, artists: joinArtists(u.artists), tries: u.tries, lastError: u.lastError }))
+  Object.entries(s.unmatched).sort(bySavedAtDesc).map(([uid, u]) => ({ uid, title: u.title, artists: joinArtists(u.artists), tries: u.tries, lastError: u.lastError, dormant: u.dormant }))
 
 export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions = {}): Promise<SyncReport> {
   const now = opts.now ?? Date.now
@@ -171,7 +213,13 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
     if (opts.full) {
       state.newestSeen = undefined
       state.backfill = undefined
-      for (const u of Object.values(state.unmatched)) u.tries = 0
+      for (const u of Object.values(state.unmatched)) {
+        if (u.permanent) continue // still nothing to search for, `full` doesn't change that
+        u.dormant = false
+        u.rung = 0
+        u.awake = false
+        u.lastTried = new Date(0).toISOString() // force it due now regardless of where it was in the ladder
+      }
     }
 
     // 1. NTS → pending. Incremental walk from the top down to the newest timestamp we've
@@ -212,7 +260,8 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
 
     // 2. This run's look-ups: newest saves first, then retries that are due.
     const queue: NtsTrack[] = Object.entries(state.pending).sort(bySavedAtDesc).map(([uid, e]) => ({ uid, ...e }))
-    for (const [uid, u] of Object.entries(state.unmatched)) if (u.title && isDue(u, now())) queue.push({ uid, title: u.title, artists: u.artists, savedAt: u.savedAt })
+    const woke = report.scanned > 0 // a genuinely new NTS save this run — proof the service is still in use
+    for (const [uid, u] of Object.entries(state.unmatched)) if (u.title && isDue(u, now(), woke)) queue.push({ uid, title: u.title, artists: u.artists, savedAt: u.savedAt })
     const batch = queue.slice(0, opts.maxLookups ?? Infinity)
     if (queue.length > batch.length) log(`${queue.length - batch.length} look-up(s) deferred to the next run`)
     if (!batch.length) return report
@@ -224,8 +273,8 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
     for (const t of batch) {
       const prev = state.unmatched[t.uid]
       const stamp = new Date(now()).toISOString()
-      const miss = (tries: number, lastError?: string) => {
-        state.unmatched[t.uid] = { title: t.title, artists: t.artists, savedAt: t.savedAt, tries, lastTried: stamp, lastError }
+      const miss = (tries: number, lastError: string | undefined, ladder: Pick<UnmatchedEntry, 'dormant' | 'rung' | 'awake'>) => {
+        state.unmatched[t.uid] = { title: t.title, artists: t.artists, savedAt: t.savedAt, tries, lastTried: stamp, lastError, ...ladder }
         delete state.pending[t.uid]
       }
       try {
@@ -236,7 +285,7 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
           matched.push({ t, id: best.pick.id, name, score: best.score })
           log(`  ✓ ${joinArtists(t.artists)} – ${t.title}  →  ${name} (${best.score.toFixed(2)})`)
         } else {
-          miss((prev?.tries ?? 0) + 1)
+          miss((prev?.tries ?? 0) + 1, undefined, advanceLadder(prev))
           log(`  ✗ ${joinArtists(t.artists)} – ${t.title}  (not found on Spotify — no fallback)`)
           if (!prev) await push('Not on Spotify', `${joinArtists(t.artists)} – ${t.title}\nSaved on NTS but no exact match on Spotify.`)
         }
@@ -244,7 +293,7 @@ export async function runSync(env: SyncEnv, store: SyncStore, opts: SyncOptions 
         // Rate-limited, or the very first look-up failed (auth/permission — systemic): abort the
         // run so it is reported once, leaving everything queued. Otherwise record and move on.
         if (e?.status === 429 || outcomes === 0) throw e
-        miss((prev?.tries ?? 0) + 1, String(e?.message ?? e))
+        miss((prev?.tries ?? 0) + 1, String(e?.message ?? e), holdLadder(prev))
         log(`  ! ${joinArtists(t.artists)} – ${t.title}  (${e?.message ?? e})`)
       }
     }

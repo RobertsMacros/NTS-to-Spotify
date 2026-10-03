@@ -137,10 +137,18 @@ Every Spotify search hit has to clear all of these, or it's a miss:
 - **The artist matches.** A cover is rejected; an artist name one or two keystrokes
   off (a tracklist typo) is not, provided the title is exact.
 
-Nothing clears the bar → recorded as *not on Spotify*, one push, and it's quietly
-rechecked about once a week, indefinitely, in case Spotify adds it — not on every run,
-but not forgotten either. It never falls back to a lookalike. (A track with no title on
-NTS has nothing to search for, so it's never auto-rechecked — pin it by hand instead.)
+Nothing clears the bar → recorded as *not on Spotify*, one push, and it never falls back
+to a lookalike. It's rechecked quietly in case Spotify adds it — not on every run, but
+not forgotten either:
+
+- First at 1, 3, 7 and 30 days.
+- After that it rests, rather than polling forever, until you heart something new on
+  NTS — proof you're still using it. That wakes every resting miss: checked right away,
+  then again at 7 and 30 days, then resting once more until the next new like. Stop
+  using NTS and nothing is ever rechecked again, at no extra cost either way.
+
+(A track with no title on NTS has nothing to search for, so it's never auto-rechecked —
+pin it by hand instead.)
 
 ## How it works
 

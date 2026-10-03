@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { buildQueries, editDistance, isTypoOf, normalise, parseSpotifyTrackId, pickBest, scoreCandidate, splitArtists, stripFeat, titleVariants, truncatedPrefix, versionTags, type NtsTrack, type SpotifyCandidate } from '../src/match'
-import { clampCap, emptyState, isDue, pinMatches, runSync, type SyncState, type SyncStore } from '../src/sync'
+import { clampCap, emptyState, isDue, pinMatches, runSync, type SyncState, type SyncStore, type UnmatchedEntry } from '../src/sync'
 
 const nts = (title: string, artists: string[], uid = 't1'): NtsTrack => ({ uid, title, artists, savedAt: '2026-09-01T00:00:00.000Z' })
 const sp = (id: string, name: string, artists: string[]): SpotifyCandidate => ({ id, name, artists })
@@ -249,13 +249,81 @@ describe('runSync', () => {
     const t0 = Date.parse('2026-09-03T00:00:00Z')
     await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 })
     fake.catalogue.push(sp('dub', 'Unreleased Dubplate', ['Nobody']))
-    const r1 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 3 * 86_400_000 }) // 3d later: not due yet
+    const r1 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 12 * 3_600_000 }) // 12h later: not due yet (first rung waits 1 day)
     expect(r1.added).toBe(0)
-    const r2 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 8 * 86_400_000 }) // 8d later: due (weekly)
+    const r2 = await runSync(env, store, { notify: async (_t, b) => { pushes.push(b) }, now: () => t0 + 86_400_000 }) // 1 day later: due
     expect(r2.added).toBe(1)
     expect(store.state!.unmatched.u2).toBeUndefined()
     expect(store.state!.synced.u2.spotifyId).toBe('dub')
     expect(pushes).toHaveLength(1)
+  })
+
+  it('end to end: a miss walks the 1/3/7/30-day ladder, rests once stale, then only a fresh like wakes it', async () => {
+    const store = memStore()
+    const day = 86_400_000
+    const t0 = Date.parse('2026-09-03T00:00:00Z')
+    const searched = () => fake.calls.filter((c) => c.includes('/v1/search')).length
+
+    await runSync(env, store, { notify: async () => {}, now: () => t0 }) // discovers u2 as a fresh miss: rung 0, wait 1 day
+    expect(store.state!.unmatched.u2.dormant).toBeFalsy()
+
+    // "Unreleased Dubplate" / "Nobody" has no match in the catalogue, so every check exhausts
+    // both of buildQueries' candidates (2 search calls) before giving up for that rung.
+    for (const elapsed of [day, 4 * day, 11 * day]) {
+      fake.calls = []
+      const r = await runSync(env, store, { notify: async () => {}, now: () => t0 + elapsed })
+      expect(searched()).toBe(2) // each rung boundary is checked exactly once
+      expect(r.added).toBe(0)
+      expect(store.state!.unmatched.u2.dormant).toBeFalsy()
+    }
+
+    // the 30-day rung: still missing → the fresh ladder (1,3,7,30) is now exhausted → dormant
+    fake.calls = []
+    await runSync(env, store, { notify: async () => {}, now: () => t0 + 41 * day })
+    expect(searched()).toBe(2)
+    expect(store.state!.unmatched.u2.dormant).toBe(true)
+
+    // stop "using NTS": no new saves, any amount of elapsed time → never rechecked again
+    fake.calls = []
+    const idle = await runSync(env, store, { notify: async () => {}, now: () => t0 + 400 * day })
+    expect(idle.scanned).toBe(0)
+    expect(searched()).toBe(0)
+    expect(store.state!.unmatched.u2.dormant).toBe(true) // still resting, not abandoned — just not polled
+
+    // heart a new track on NTS → this run "wakes" every dormant miss: checked right away
+    fake.ntsTracks.push({ track_uid: 'u6', song_title: 'Xtal', artist_names: ['Aphex Twin'], created_at: '2026-10-20T00:00:00Z' })
+    fake.liked.delete('xtal')
+    fake.calls = []
+    const wake = await runSync(env, store, { notify: async () => {}, now: () => t0 + 401 * day })
+    expect(wake.scanned).toBe(1) // the proof of activity that did the waking
+    expect(wake.added).toBe(1) // u6 matches straight away (1 query); u2 still misses (its usual 2 queries)
+    expect(searched()).toBe(3)
+    expect(store.state!.unmatched.u2.dormant).toBe(false)
+    expect(store.state!.unmatched.u2.awake).toBe(true) // now on the shorter 7/30-day ladder
+
+    // the wake ladder: 7 days, then 30, then dormant again — exactly as before, just shorter
+    const wokeAt = t0 + 401 * day
+    fake.calls = []
+    await runSync(env, store, { notify: async () => {}, now: () => wokeAt + 6 * day })
+    expect(searched()).toBe(0) // not due yet
+    fake.calls = []
+    await runSync(env, store, { notify: async () => {}, now: () => wokeAt + 7 * day })
+    expect(searched()).toBe(2)
+    expect(store.state!.unmatched.u2.dormant).toBeFalsy()
+    fake.calls = []
+    await runSync(env, store, { notify: async () => {}, now: () => wokeAt + 7 * day + 30 * day })
+    expect(searched()).toBe(2)
+    expect(store.state!.unmatched.u2.dormant).toBe(true) // the wake ladder is exhausted too — rests again, ad infinitum
+
+    // and it can be woken again, however many cycles later
+    fake.ntsTracks.push({ track_uid: 'u7', song_title: 'Xtal', artist_names: ['Aphex Twin'], created_at: '2027-06-01T00:00:00Z' })
+    fake.liked.delete('xtal')
+    fake.calls = []
+    const wake2 = await runSync(env, store, { notify: async () => {}, now: () => wokeAt + 500 * day })
+    expect(wake2.scanned).toBe(1)
+    expect(wake2.added).toBe(1) // u7
+    expect(searched()).toBe(3) // u7 (1 query) + u2 woken again (its usual 2)
+    expect(store.state!.unmatched.u2.dormant).toBe(false)
   })
 
   it('caps look-ups per run, NEWEST first, and drains the backlog on later runs', async () => {
@@ -282,7 +350,7 @@ describe('runSync', () => {
     fake.ntsTracks.push({ track_uid: 'u5', song_title: 'Xtal', artist_names: ['Aphex Twin'], created_at: '2026-09-04T00:00:00Z' })
     fake.liked.delete('xtal')
     fake.calls = []
-    const r = await runSync(env, store, { notify: async () => {}, now: () => t0 + 8 * 86_400_000, maxLookups: 1 }) // u2 is due (weekly), but u5 goes first
+    const r = await runSync(env, store, { notify: async () => {}, now: () => t0 + 8 * 86_400_000, maxLookups: 1 }) // u2's 1-day wait is long past, but u5 goes first
     expect(r.added).toBe(1)
     expect(store.state!.synced.u5).toBeDefined()
     expect(store.state!.unmatched.u2.tries).toBe(1)
@@ -405,22 +473,49 @@ describe('runSync', () => {
     expect(store.state!.synced.u2.matched).toBe('pinned')
   })
 
-  it('a miss is rechecked about weekly, indefinitely — never every run, never abandoned', () => {
-    const base = { title: 't', artists: ['a'], savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z' }
+  it('a fresh miss is rechecked at 1, 3, 7 and 30 days, then goes dormant — not woken by mere elapsed time', () => {
+    const base = { title: 't', artists: ['a'], tries: 1, savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z' }
     const now = Date.parse('2026-09-01T00:10:00Z')
     const day = 86_400_000
-    expect(isDue({ ...base, tries: 0 }, now)).toBe(true) // an errored look-up isn't a real try — retried straight away
-    expect(isDue({ ...base, tries: 1 }, now)).toBe(false) // just missed — not due yet
-    expect(isDue({ ...base, tries: 1 }, now + 6 * day)).toBe(false)
-    expect(isDue({ ...base, tries: 1 }, now + 7 * day)).toBe(true)
-    // no cutoff, ever — a track missed a year ago is still checked weekly
-    expect(isDue({ ...base, tries: 50, lastTried: '2026-09-01T00:00:00Z' }, now + 365 * day)).toBe(true)
-    expect(isDue({ ...base, tries: 50, lastTried: new Date(now + 364 * day).toISOString() }, now + 365 * day)).toBe(false)
+    // rung 0: wait 1 day
+    expect(isDue({ ...base, rung: 0 }, now, false)).toBe(false)
+    expect(isDue({ ...base, rung: 0 }, now + day, false)).toBe(true)
+    // rung 1 (after the 1-day check still missed): wait 3 days
+    expect(isDue({ ...base, rung: 1 }, now + 2 * day, false)).toBe(false)
+    expect(isDue({ ...base, rung: 1 }, now + 3 * day, false)).toBe(true)
+    // rung 3 (the last fresh rung, 30 days) is the end of the ladder — beyond it, dormant
+    expect(isDue({ ...base, rung: 3 }, now + 30 * day, false)).toBe(true)
+    expect(isDue({ ...base, rung: 3, dormant: true }, now + 365 * day, false)).toBe(false) // time alone never wakes it
   })
-  it('a permanent entry (no searchable title) is never due, however many tries or however long', () => {
-    const base = { title: '', artists: ['a'], savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z', permanent: true as const }
-    expect(isDue({ ...base, tries: 0 }, Date.parse('2026-09-01T00:00:00Z'))).toBe(false)
-    expect(isDue({ ...base, tries: 1 }, Date.parse('2027-09-01T00:00:00Z'))).toBe(false)
+
+  it('a dormant miss wakes only when this run saw a genuinely new NTS save', () => {
+    const dormant = { title: 't', artists: ['a'], tries: 5, savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-10-01T00:00:00Z', dormant: true }
+    const now = Date.parse('2027-01-01T00:00:00Z') // ages later — elapsed time alone changes nothing
+    expect(isDue(dormant, now, false)).toBe(false)
+    expect(isDue(dormant, now, true)).toBe(true) // woken by a fresh like this run
+  })
+
+  it('advanceLadder/isDue: once woken, the next two checks are at 7 then 30 days, then dormant again', () => {
+    // simulate the sequence runSync would produce via the miss()/advanceLadder() path
+    let u: UnmatchedEntry = { title: 't', artists: ['a'], tries: 5, savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-10-01T00:00:00Z', dormant: true }
+    const day = 86_400_000
+    const t0 = Date.parse('2027-01-01T00:00:00Z')
+    expect(isDue(u, t0, true)).toBe(true) // woken: "checks then"
+    u = { ...u, dormant: false, rung: 0, awake: true, lastTried: new Date(t0).toISOString() } // what miss() would record
+    expect(isDue(u, t0 + 6 * day, false)).toBe(false)
+    expect(isDue(u, t0 + 7 * day, false)).toBe(true) // "and again in 7"
+    u = { ...u, rung: 1, lastTried: new Date(t0 + 7 * day).toISOString() }
+    expect(isDue(u, t0 + 7 * day + 29 * day, false)).toBe(false)
+    expect(isDue(u, t0 + 7 * day + 30 * day, false)).toBe(true) // "and 30 days"
+    u = { ...u, rung: 2, dormant: true, lastTried: new Date(t0 + 7 * day + 30 * day).toISOString() } // exhausted the wake ladder → rests again
+    expect(isDue(u, t0 + 400 * day, false)).toBe(false) // ad infinitum: still resting without a new like
+    expect(isDue(u, t0 + 400 * day, true)).toBe(true) // …and wakes again the moment one arrives
+  })
+
+  it('a permanent entry (no searchable title) is never due, however long or however it wakes', () => {
+    const base = { title: '', artists: ['a'], tries: 1, savedAt: '2026-09-01T00:00:00Z', lastTried: '2026-09-01T00:00:00Z', permanent: true as const }
+    expect(isDue(base, Date.parse('2026-09-01T00:00:00Z'), false)).toBe(false)
+    expect(isDue(base, Date.parse('2027-09-01T00:00:00Z'), true)).toBe(false)
   })
 
   it('records an NTS entry with no title as unmatched (never retried, pin by hand)', async () => {
