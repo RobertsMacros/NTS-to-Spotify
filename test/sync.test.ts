@@ -326,6 +326,37 @@ describe('runSync', () => {
     expect(store.state!.unmatched.u2.dormant).toBe(false)
   })
 
+  it('keeps a dormant miss awake when its wake-up lookup fails technically', async () => {
+    const t0 = Date.parse('2026-09-03T00:00:00Z')
+    const store = memStore({
+      ...emptyState(),
+      newestSeen: '2026-09-01T12:00:00Z',
+      unmatched: {
+        u2: {
+          title: 'Unreleased Dubplate', artists: ['Nobody'], savedAt: '2026-09-01T11:00:00Z',
+          tries: 5, lastTried: '2026-09-01T00:00:00Z', dormant: true, rung: 4,
+        },
+      },
+    })
+    fake.ntsTracks.push({ track_uid: 'u6', song_title: 'Xtal', artist_names: ['Aphex Twin'], created_at: '2026-09-02T00:00:00Z' })
+    fake.liked.delete('xtal')
+    const normalFetch = fakeFetch(fake)
+    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any = {}) => {
+      const url = String(input)
+      if (url.includes('/v1/search') && new URL(url).searchParams.get('q')?.includes('Unreleased')) {
+        return new Response('temporary failure', { status: 503 })
+      }
+      return normalFetch(input, init)
+    }))
+
+    await runSync(env, store, { notify: async () => {}, now: () => t0 })
+
+    expect(store.state!.unmatched.u2.dormant).toBe(false)
+    expect(store.state!.unmatched.u2.awake).toBe(true)
+    expect(store.state!.unmatched.u2.rung).toBe(0)
+    expect(store.state!.unmatched.u2.lastError).toContain('HTTP 503')
+  })
+
   it('caps look-ups per run, NEWEST first, and drains the backlog on later runs', async () => {
     const store = memStore()
     const r1 = await runSync(env, store, { notify: async () => {}, maxLookups: 1 })
