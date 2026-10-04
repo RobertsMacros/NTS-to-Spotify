@@ -163,6 +163,10 @@ function advanceLadder(prev: UnmatchedEntry | undefined): Pick<UnmatchedEntry, '
 
 /** A technical error (network, rate limit) doesn't cost ladder progress — retry at the same wait. */
 function holdLadder(prev: UnmatchedEntry | undefined): Pick<UnmatchedEntry, 'dormant' | 'rung' | 'awake'> {
+  // A dormant miss was only queued because a fresh NTS save woke it. If that
+  // lookup fails technically, keep it awake so the failure gets another
+  // timed attempt instead of requiring a second new like to wake it again.
+  if (prev?.dormant) return { dormant: false, rung: 0, awake: true }
   return { dormant: !!prev?.dormant, rung: prev?.rung ?? 0, awake: !!prev?.awake }
 }
 
