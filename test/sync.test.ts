@@ -355,6 +355,20 @@ describe('runSync', () => {
     expect(store.state!.unmatched.u2.awake).toBe(true)
     expect(store.state!.unmatched.u2.rung).toBe(0)
     expect(store.state!.unmatched.u2.lastError).toContain('HTTP 503')
+
+    // With no further NTS saves, the failed wake still receives its timed retry.
+    vi.stubGlobal('fetch', normalFetch)
+    fake.catalogue.push(sp('dub', 'Unreleased Dubplate', ['Nobody']))
+    fake.calls = []
+    const beforeDue = await runSync(env, store, { notify: async () => {}, now: () => t0 + 6 * 86_400_000 })
+    expect(beforeDue.scanned).toBe(0)
+    expect(fake.calls.filter((c) => c.includes('/v1/search'))).toHaveLength(0)
+
+    const retry = await runSync(env, store, { notify: async () => {}, now: () => t0 + 7 * 86_400_000 })
+    expect(retry.scanned).toBe(0)
+    expect(retry.added).toBe(1)
+    expect(store.state!.unmatched.u2).toBeUndefined()
+    expect(store.state!.synced.u2.spotifyId).toBe('dub')
   })
 
   it('caps look-ups per run, NEWEST first, and drains the backlog on later runs', async () => {
