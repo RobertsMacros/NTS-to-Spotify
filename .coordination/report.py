@@ -69,6 +69,34 @@ def uuid_value(value):
         raise argparse.ArgumentTypeError('Use a canonical UUID')
     return value
 
+def write_status_md(target):
+    event = target['event']
+    path = '.coordination/status/' + key(target['repository'],target['task_id']) + '.md'
+    gate = event.get('user_input') or {}
+    text = (f"# {event['title']}\n\nRepository: `{target['repository']}`\n\n"
+            f"Task: `{target['task_id']}` · Actor: `{target['actor_id']}`\n\n"
+            f"Status: **{event['status']}** · Ownership {'active — do not duplicate' if target['active'] else 'released'}\n\n"
+            f"Updated: {event['occurred_at']}\n\n{event['summary']}\n\n"
+            f"## Captured scope\n\n{event['scope']}\n\n"
+            f"## Needs Robert\n\n{gate.get('action','No human input requested.')}\n\n{gate.get('why','')}\n\n"
+            f"Event: `{event['event_id']}`. A done assertion requires exact-scope verification; this page is a readable projection.\n")
+    # The JSON claim/event are canonical. Never overwrite a changed Markdown
+    # projection on a stale SHA; surface uncertainty rather than guessing.
+    existing = api(f'repos/{HUB}/contents/{path}?ref=main',missing=True)
+    if existing and base64.b64decode(existing['content']).decode()==text:
+        return
+    body = {'message':'coordination: readable task status '+event['event_id'], 'branch':'main',
+            'content':base64.b64encode(text.encode()).decode()}
+    if existing:
+        body['sha'] = existing['sha']
+    try:
+        api(f'repos/{HUB}/contents/{path}',body)
+    except (ReportingError,subprocess.TimeoutExpired):
+        pass
+    confirmed = api(f'repos/{HUB}/contents/{path}?ref=main')
+    if base64.b64decode(confirmed['content']).decode()!=text:
+        raise ReportingError('Readable status was not confirmed; retry the saved event')
+
 def publish(packet):
     claim, sha = read(packet['claim_path'])
     target = packet['claim']
@@ -93,6 +121,7 @@ def publish(packet):
             remote, _ = read(packet['event_path'])
             if remote != packet['event']:
                 raise ReportingError('Claim saved, event publication uncertain; retry before starting work')
+    write_status_md(target)
     # Both records are read back, including their exact scope and actor identity.
     confirmed, _ = read(packet['claim_path'])
     event, _ = read(packet['event_path'])
