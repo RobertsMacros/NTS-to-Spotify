@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 HUB = 'RobertsMacros/project-coordination'
-VERSION = '2026-10-10.1'
+VERSION = '2026-10-10.2'
 CATEGORIES = {'account_access', 'decision', 'approval', 'files', 'api_token', 'physical'}
 
 class ReportingError(RuntimeError):
@@ -186,6 +186,9 @@ def report(args):
     else:
         if not previous or not previous.get('active') or previous['actor_id'] != args.actor:
             raise ReportingError('Acquire an active start claim with this actor before reporting progress')
+        prior_event, _ = read(f".coordination/progress/{repo.split('/')[1]}/{previous['event']['event_id']}.json")
+        if prior_event != previous['event']:
+            raise ReportingError('Previous event publication is incomplete; retry '+previous['event']['event_id']+' before another update')
         contract = previous['contract']
         status = args.status
     if args.diagnostic and repo != HUB:
