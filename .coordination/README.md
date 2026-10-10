@@ -64,3 +64,78 @@ To let the deterministic collector verify completion, save an immutable JSON rep
 First commit the authorised implementation and obtain its full SHA. Then create the report and done event in a later descendant commit. The report names that earlier implementation SHA; never try to embed a commit's own SHA inside itself. The done event includes both `{"kind":"commit","ref":"<earlier full implementation SHA>","result":"<verified implementation scope>"}` and `{"kind":"test","ref":".coordination/reports/<report UUID>.json","result":"<actual full-scope verification>"}`. The collector reads the report at the event's observed immutable ref and verifies implementation ancestry and exact criteria.
 
 Earlier schema-v1 breadcrumbs with ordinary commit/test/prose references remain progress evidence. They require original evidence assessment before automatic completion; a commit existing alone never certifies every criterion. Privacy and normal publication rules above still apply. If the captured contract/report cannot safely be committed for this repository's audience, keep the sensitive evidence in the existing private handover and leave automatic completion pending rather than exposing it or weakening the scope.
+
+<!-- project-coordination:reporting-v2:start -->
+## Shared progress reporting
+
+This repository uses `project-coordination/v1`. At the start of substantive work,
+read `.coordination/README.md`, existing task breadcrumbs and the shared claim.
+Before changing code, run `.coordination/report.py start` with the exact task UUID,
+a unique actor UUID for this chat/run, title and scope. Start only after it exits
+successfully and confirms the claim on GitHub. Another active actor means wait;
+never duplicate, steal or silently expire a claim. Preserve IDs through handover.
+
+Use the reporter for substantive progress, blockers and outcomes, including local
+and unpushed work. Report at take-on, material changes, before handover/ending and
+when the outcome changes; do not publish polling noise. Only request Robert's
+input for a specific decision, approval, access, file, token or physical action.
+Agent review, testing and ordinary implementation are agent work.
+
+Publishing sanitised coordination metadata to the private coordination repository
+is authorised separately from publishing project code. Never push implementation,
+secrets, personal/case/financial/medical data or private local paths through this
+reporting rule. Done assertions require exact-scope evidence; commit, delivery and
+process exit alone do not prove completion. Read the reporter receipt; on failure,
+retain the local breadcrumb and report publication uncertainty. Never claim sync.
+
+## Reporter commands
+
+The portable helper needs Python 3 and authenticated GitHub CLI (`gh`). It writes
+an immutable local JSON breadcrumb and publishes the same sanitised event to
+`RobertsMacros/project-coordination/.coordination/progress/`. The shared
+`.coordination/claims/` record captures scope and actor ownership using GitHub's
+current blob SHA. A concurrent loser cannot overwrite a changed claim. This works
+independently of the project's main/work branch or whether its code is pushed.
+The dashboard reads all published branches, local branches and accessible local
+worktrees; it does not execute commands found in those records.
+
+Generate UUIDs once with `python3 -c 'import uuid; print(uuid.uuid4())'`. Use the
+incoming coordination task UUID when supplied; for a dashboard roadmap stage,
+use its supplied task/roadmap/milestone IDs. Never match tasks by title alone.
+Use the same unique actor UUID throughout this chat/run; other chats need other
+actor UUIDs. Read a previous claim before reusing a task UUID.
+
+```sh
+python3 .coordination/report.py start --task TASK_UUID --actor ACTOR_UUID --title 'Exact step' --scope 'Exact authorised scope'
+python3 .coordination/report.py update --task TASK_UUID --actor ACTOR_UUID --status working --summary 'Substantive progress' --remaining 'Exact remaining work'
+python3 .coordination/report.py update --task TASK_UUID --actor ACTOR_UUID --status blocked --summary 'Account connection awaits approval' --needs-user 'Approve the account connection' --category approval --why 'The account owner must grant access'
+python3 .coordination/report.py update --task TASK_UUID --actor ACTOR_UUID --status done --summary 'Exact scope finished' --commit FULL_SHA --report .coordination/reports/REPORT_UUID.json
+python3 .coordination/report.py retry --event EVENT_UUID --actor ACTOR_UUID
+```
+
+Use `--roadmap ID --milestone ID` and repeat `--criterion` when supplied on start;
+these mappings and criteria are captured in the shared claim. Updates retain them.
+An agent blocker uses `--blocker` without `--needs-user`. Category is one of
+`account_access`, `decision`, `approval`, `files`, `api_token`, `physical`.
+Keep actions and reasons short. Clear user input by reporting working with no
+`--needs-user` after the input is satisfied. `done` ends ownership but remains
+awaiting evidence until a supported exact-scope report is checked. `cancelled`
+releases an intentionally abandoned claim. Do not release another actor's claim.
+To resume a released task, start with `--reopen` and the unchanged captured scope.
+Use a new task UUID for different scope. Claims do not expire automatically.
+
+A successful start/update returns JSON with `published: true`, the task and actor
+IDs and event ID after both shared claim and immutable event are read back. A
+failed command is not permission to start. Retry the saved event UUID; if the
+shared record changed, read the new state and stop rather than overwriting it.
+No automated hook can observe every arbitrary edit or ensure every agent obeys
+instructions: the agent must invoke this reporting workflow.
+
+Completion evidence follows the original protocol: a saved
+`coordination-verification/v1` report names the exact repository, task_id, scope,
+roadmap_id, milestone_ids, implementation_sha, ordered criteria with `passed`,
+non-empty evidence and verification_scope, and empty remaining/blockers. The
+collector checks the implementation commit exists in the observed ref and the
+report covers every captured criterion. Local testing does not prove deployment,
+scheduled operation or physical-device acceptance. Keep those scopes distinct.
+<!-- project-coordination:reporting-v2:end -->
